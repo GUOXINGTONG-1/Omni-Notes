@@ -72,6 +72,7 @@ import androidx.appcompat.widget.SearchView.OnQueryTextListener;
 import androidx.core.util.Pair;
 import androidx.core.view.GravityCompat;
 import androidx.core.view.MenuItemCompat;
+import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.recyclerview.widget.DefaultItemAnimator;
 import androidx.recyclerview.widget.DividerItemDecoration;
 import androidx.recyclerview.widget.ItemTouchHelper;
@@ -179,10 +180,15 @@ public class ListFragment extends BaseFragment implements OnViewTouchedListener,
   @Override
   public void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
-    mFragment = this;
+    setFragment();
     setHasOptionsMenu(true);
     setRetainInstance(true);
     EventBus.getDefault().register(this, 1);
+  }
+
+
+  private void setFragment() {
+    mFragment = this;
   }
 
 
@@ -197,17 +203,20 @@ public class ListFragment extends BaseFragment implements OnViewTouchedListener,
   public View onCreateView(LayoutInflater inflater, ViewGroup container,
       Bundle savedInstanceState) {
     if (savedInstanceState != null) {
-      if (savedInstanceState.containsKey(LIST_VIEW_POSITION)) {
-        listViewPosition = savedInstanceState.getInt(LIST_VIEW_POSITION);
-        listViewPositionOffset = savedInstanceState.getInt(LIST_VIEW_POSITION_OFFSET);
-        searchQuery = savedInstanceState.getString("searchQuery");
-        searchTags = savedInstanceState.getString("searchTags");
+      boolean isInstanceContainKey = savedInstanceState.containsKey(LIST_VIEW_POSITION);
+      if (isInstanceContainKey) {
+        loadSavedInstanceState(savedInstanceState);
       }
       keepActionMode = false;
     }
     binding = FragmentListBinding.inflate(inflater, container, false);
     View view = binding.getRoot();
+    setBindingListContext();
 
+    return view;
+  }
+
+  private void setBindingListContext() {
     binding.list.setHasFixedSize(true);
     LinearLayoutManager linearLayoutManager = new LinearLayoutManager(getContext());
     binding.list.setLayoutManager(linearLayoutManager);
@@ -226,8 +235,14 @@ public class ListFragment extends BaseFragment implements OnViewTouchedListener,
 
     // Replace listview with Mr. Jingles if it is empty
     binding.list.setEmptyView(binding.emptyList);
+  }
 
-    return view;
+
+  private void loadSavedInstanceState(Bundle savedInstanceState) {
+    listViewPosition = savedInstanceState.getInt(LIST_VIEW_POSITION);
+    listViewPositionOffset = savedInstanceState.getInt(LIST_VIEW_POSITION_OFFSET);
+    searchQuery = savedInstanceState.getString("searchQuery");
+    searchTags = savedInstanceState.getString("searchTags");
   }
 
 
@@ -334,7 +349,6 @@ public class ListFragment extends BaseFragment implements OnViewTouchedListener,
       jinglesAnimation = null;
       binding.emptyList
           .setCompoundDrawablesWithIntrinsicBounds(0, R.drawable.jingles_animation, 0, 0);
-
     }
   }
 
@@ -380,8 +394,8 @@ public class ListFragment extends BaseFragment implements OnViewTouchedListener,
   @Override
   public void onResume() {
     super.onResume();
-    if (mainActivity.prefsChanged) {
-      mainActivity.prefsChanged = false;
+    if (mainActivity.getPrefsChanged()) {
+      mainActivity.setPrefsChangedFalse();
       init();
     } else if (Intent.ACTION_SEARCH.equals(mainActivity.getIntent().getAction())) {
       initNotesList(mainActivity.getIntent());
@@ -422,7 +436,7 @@ public class ListFragment extends BaseFragment implements OnViewTouchedListener,
       }
 
       actionMode = null;
-      LogDelegate.d("Closed multiselection contextual menu");
+      LogDelegate.debugLog("Closed multiselection contextual menu");
     }
 
 
@@ -478,7 +492,6 @@ public class ListFragment extends BaseFragment implements OnViewTouchedListener,
     if (getSelectedNotes().isEmpty()) {
       finishActionMode();
     }
-
   }
 
 
@@ -551,7 +564,7 @@ public class ListFragment extends BaseFragment implements OnViewTouchedListener,
 
   @Override
   public void onViewTouchOccurred(MotionEvent ev) {
-    LogDelegate.v("Notes list: onViewTouchOccurred " + ev.getAction());
+    LogDelegate.vervoseLog("Notes list: onViewTouchOccurred " + ev.getAction());
     commitPending();
   }
 
@@ -680,8 +693,8 @@ public class ListFragment extends BaseFragment implements OnViewTouchedListener,
     searchView.setOnQueryTextFocusChangeListener(
         (v, hasFocus) -> setActionItemsVisibility(menu, hasFocus));
 
-    MenuItemCompat
-        .setOnActionExpandListener(searchMenuItem, new MenuItemCompat.OnActionExpandListener() {
+    searchMenuItem
+        .setOnActionExpandListener(new MenuItem.OnActionExpandListener() {
 
           boolean searchPerformed = false;
 
@@ -809,10 +822,11 @@ public class ListFragment extends BaseFragment implements OnViewTouchedListener,
     if (actionMode == null) {
       switch (item.getItemId()) {
         case android.R.id.home:
-          if (mainActivity.getDrawerLayout().isDrawerOpen(GravityCompat.START)) {
-            mainActivity.getDrawerLayout().closeDrawer(GravityCompat.START);
+          DrawerLayout drawerLayout = mainActivity.getDrawerLayout();
+          if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
+            drawerLayout.closeDrawer(GravityCompat.START);
           } else {
-            mainActivity.getDrawerLayout().openDrawer(GravityCompat.START);
+            drawerLayout.openDrawer(GravityCompat.START);
           }
           break;
         case R.id.menu_filter:
@@ -846,7 +860,7 @@ public class ListFragment extends BaseFragment implements OnViewTouchedListener,
           emptyTrash();
           break;
         default:
-          LogDelegate.e("Wrong element choosen: " + item.getItemId());
+          LogDelegate.errorLog("Wrong element choosen: " + item.getItemId());
       }
     } else {
       switch (item.getItemId()) {
@@ -887,7 +901,7 @@ public class ListFragment extends BaseFragment implements OnViewTouchedListener,
 //                    synchronizeSelectedNotes();
 //                    break;
         default:
-          LogDelegate.e("Wrong element choosen: " + item.getItemId());
+          LogDelegate.errorLog("Wrong element choosen: " + item.getItemId());
       }
     }
 
@@ -919,20 +933,17 @@ public class ListFragment extends BaseFragment implements OnViewTouchedListener,
       PasswordHelper.requestPassword(mainActivity, passwordConfirmed -> {
         if (passwordConfirmed.equals(PasswordValidator.Result.SUCCEED)) {
           note.setPasswordChecked(true);
-          AnimationsHelper.zoomListItem(mainActivity, view, getZoomListItemView(view, note),
-              binding.listRoot, buildAnimatorListenerAdapter(note));
         }
       });
-    } else {
-      AnimationsHelper.zoomListItem(mainActivity, view, getZoomListItemView(view, note),
-          binding.listRoot, buildAnimatorListenerAdapter(note));
     }
+    AnimationsHelper.zoomListItem(mainActivity, view, getZoomListItemView(view, note),
+            binding.listRoot, buildAnimatorListenerAdapter(note));
   }
 
 
   void editNote2(Note note) {
     if (note.get_id() == null) {
-      LogDelegate.d("Adding new note");
+      LogDelegate.debugLog("Adding new note");
       // if navigation is a category it will be set into note
       try {
         if (checkNavigation(Navigation.CATEGORY) || !isEmpty(mainActivity.navigationTmp)) {
@@ -941,10 +952,10 @@ public class ListFragment extends BaseFragment implements OnViewTouchedListener,
           note.setCategory(DbHelper.getInstance().getCategory(Long.parseLong(categoryId)));
         }
       } catch (NumberFormatException e) {
-        LogDelegate.v("Maybe was not a category!");
+        LogDelegate.vervoseLog("Maybe was not a category!");
       }
     } else {
-      LogDelegate.d("Editing note with ID: " + note.get_id());
+      LogDelegate.debugLog("Editing note with ID: " + note.get_id());
     }
 
     // Current list scrolling position is saved to be restored later
@@ -956,8 +967,8 @@ public class ListFragment extends BaseFragment implements OnViewTouchedListener,
 
 
   @Override
-  public// Used to show a Crouton dialog after saved (or tried to) a note
-  void onActivityResult(int requestCode, final int resultCode, Intent intent) {
+  // Used to show a Crouton dialog after saved (or tried to) a note
+  public void onActivityResult(int requestCode, final int resultCode, Intent intent) {
     super.onActivityResult(requestCode, resultCode, intent);
     switch (requestCode) {
       case REQUEST_CODE_CATEGORY:
@@ -1042,7 +1053,7 @@ public class ListFragment extends BaseFragment implements OnViewTouchedListener,
    * @FIXME: This method is a divine disgrace and MUST be refactored. I'm ashamed by myself.
    */
   void initNotesList(Intent intent) {
-    LogDelegate.d("initNotesList intent: " + intent.getAction());
+    LogDelegate.debugLog("initNotesList intent: " + intent.getAction());
 
     binding.progressWheel.setAlpha(1);
     binding.list.setAlpha(0);
@@ -1229,7 +1240,7 @@ public class ListFragment extends BaseFragment implements OnViewTouchedListener,
         onNoteSwipedPerformAction(note);
       }
     } catch (IndexOutOfBoundsException e) {
-      LogDelegate.d("Please stop swiping in the zone beneath the last card");
+      LogDelegate.debugLog("Please stop swiping in the zone beneath the last card");
     }
   }
 
@@ -1457,7 +1468,7 @@ public class ListFragment extends BaseFragment implements OnViewTouchedListener,
     if (!checkNavigation(Navigation.CATEGORY)) {
       listAdapter.remove(notes);
     }
-    LogDelegate.d("Notes" + (archive ? "archived" : "restored from archive"));
+    LogDelegate.debugLog("Notes" + (archive ? "archived" : "restored from archive"));
   }
 
 
@@ -1704,7 +1715,7 @@ public class ListFragment extends BaseFragment implements OnViewTouchedListener,
       ubc.hideUndoBar(false);
       fab.showFab();
 
-      LogDelegate.d("Changes committed");
+      LogDelegate.debugLog("Changes committed");
     }
     mainActivity.updateWidgets();
   }

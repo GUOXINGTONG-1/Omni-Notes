@@ -396,7 +396,8 @@ public class DetailFragment extends BaseFragment implements OnReminderPickedList
   @Override
   public void onConfigurationChanged(Configuration newConfig) {
     super.onConfigurationChanged(newConfig);
-    if (getResources().getConfiguration().orientation != newConfig.orientation) {
+    boolean isNewConfig = (getResources().getConfiguration().orientation != newConfig.orientation);
+    if (isNewConfig) {
       orientationChanged = true;
     }
   }
@@ -431,9 +432,12 @@ public class DetailFragment extends BaseFragment implements OnReminderPickedList
    */
   private void checkNoteLock(Note note) {
     // If note is locked security password will be requested
-    if (note.isLocked()
-        && Prefs.getString(PREF_PASSWORD, null) != null
-        && !Prefs.getBoolean("settings_password_access", false)) {
+
+    boolean isNoteLocked = note.isLocked();
+    String isPasswordExist = Prefs.getString(PREF_PASSWORD, null);
+    boolean canAccessPassword = !Prefs.getBoolean("settings_password_access", false);
+
+    if (isNoteLocked && (isPasswordExist != null) && canAccessPassword) {
       PasswordHelper.requestPassword(mainActivity, passwordConfirmed -> {
         switch (passwordConfirmed) {
           case SUCCEED:
@@ -501,7 +505,7 @@ public class DetailFragment extends BaseFragment implements OnReminderPickedList
             noteTemporary = new Note();
             noteTemporary.setCategory(category);
           } catch (NumberFormatException e) {
-            LogDelegate.e("Category with not-numeric value!", e);
+            LogDelegate.errorLog("Category with not-numeric value!", e);
           }
         }
       }
@@ -722,51 +726,53 @@ public class DetailFragment extends BaseFragment implements OnReminderPickedList
       Intent attachmentIntent;
       if (MIME_TYPE_FILES.equals(attachment.getMime_type())) {
 
-        attachmentIntent = new Intent(Intent.ACTION_VIEW);
-        attachmentIntent.setDataAndType(sharableUri, StorageHelper.getMimeType(mainActivity,
-            sharableUri));
-        attachmentIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent
-            .FLAG_GRANT_WRITE_URI_PERMISSION);
-        if (IntentChecker
-            .isAvailable(mainActivity.getApplicationContext(), attachmentIntent, null)) {
-          startActivity(attachmentIntent);
-        } else {
-          mainActivity.showMessage(R.string.feature_not_available_on_this_device, ONStyle.WARN);
-        }
+      switch (attachment.getMime_type()) {
+        case "files/*":
+          attachmentIntent = new Intent(Intent.ACTION_VIEW);
+          attachmentIntent.setDataAndType(sharableUri, StorageHelper.getMimeType(mainActivity,
+                  sharableUri));
+          attachmentIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent
+                  .FLAG_GRANT_WRITE_URI_PERMISSION);
+          if (IntentChecker
+                  .isAvailable(mainActivity.getApplicationContext(), attachmentIntent, null)) {
+            startActivity(attachmentIntent);
+          } else {
+            mainActivity.showMessage(R.string.feature_not_available_on_this_device, ONStyle.WARN);
+          }
+          break;
 
-        // Media files will be opened in internal gallery
-      } else if (MIME_TYPE_IMAGE.equals(attachment.getMime_type())
-          || MIME_TYPE_SKETCH.equals(attachment.getMime_type())
-          || MIME_TYPE_VIDEO.equals(attachment.getMime_type())) {
-        // Title
-        noteTemporary.setTitle(getNoteTitle());
-        noteTemporary.setContent(getNoteContent());
+        case "image/jpeg":
+        case "image/png":
+        case "video/mp4":
+          noteTemporary.setTitle(getNoteTitle());
+          noteTemporary.setContent(getNoteContent());
         String title1 = TextHelper.parseTitleAndContent(mainActivity,
                 noteTemporary)[0].toString();
-        // Images
-        int clickedImage = 0;
-        ArrayList<Attachment> images = new ArrayList<>();
-        for (Attachment mAttachment : noteTemporary.getAttachmentsList()) {
-          if (MIME_TYPE_IMAGE.equals(mAttachment.getMime_type())
-              || MIME_TYPE_SKETCH.equals(mAttachment.getMime_type())
-              || MIME_TYPE_VIDEO.equals(mAttachment.getMime_type())) {
-            images.add(mAttachment);
-            if (mAttachment.equals(attachment)) {
-              clickedImage = images.size() - 1;
+          // Images
+          int clickedImage = 0;
+          ArrayList<Attachment> images = new ArrayList<>();
+          for (Attachment mAttachment : noteTemporary.getAttachmentsList()) {
+            if (MIME_TYPE_IMAGE.equals(mAttachment.getMime_type())
+                    || MIME_TYPE_SKETCH.equals(mAttachment.getMime_type())
+                    || MIME_TYPE_VIDEO.equals(mAttachment.getMime_type())) {
+              images.add(mAttachment);
+              if (mAttachment.equals(attachment)) {
+                clickedImage = images.size() - 1;
+              }
             }
           }
-        }
-        // Intent
-        attachmentIntent = new Intent(mainActivity, GalleryActivity.class);
-        attachmentIntent.putExtra(GALLERY_TITLE, title1);
-        attachmentIntent.putParcelableArrayListExtra(GALLERY_IMAGES, images);
-        attachmentIntent.putExtra(GALLERY_CLICKED_IMAGE, clickedImage);
-        startActivity(attachmentIntent);
+          // Intent
+          attachmentIntent = new Intent(mainActivity, GalleryActivity.class);
+          attachmentIntent.putExtra(GALLERY_TITLE, title1);
+          attachmentIntent.putParcelableArrayListExtra(GALLERY_IMAGES, images);
+          attachmentIntent.putExtra(GALLERY_CLICKED_IMAGE, clickedImage);
+          startActivity(attachmentIntent);
+          break;
 
-      } else if (MIME_TYPE_AUDIO.equals(attachment.getMime_type())) {
-        playback(v, attachment.getUri());
+        case "audio/amr":
+          playback(v, attachment.getUri());
+          break;
       }
-
     });
 
     mGridView.setOnItemLongClickListener((parent, v, position, id) -> {
@@ -827,7 +833,7 @@ public class DetailFragment extends BaseFragment implements OnReminderPickedList
         takeSketch(mAttachmentAdapter.getItem(attachmentPosition));
         break;
       default:
-        LogDelegate.w("No action available");
+        LogDelegate.warningLog("No action available");
     }
   }
 
@@ -889,15 +895,21 @@ public class DetailFragment extends BaseFragment implements OnReminderPickedList
 
       // Choosing target view depending on another preference
       ArrayList<View> target = new ArrayList<>();
-      if ("complete".equals(colorsPref)) {
-        target.add(binding.titleWrapper);
-        target.add(binding.contentWrapper);
-      } else {
-        target.add(binding.tagMarker);
+
+      switch (colorsPref) {
+        case "complete":
+          target.add(binding.titleWrapper);
+          target.add(binding.contentWrapper);
+          break;
+
+        default:
+          target.add(binding.tagMarker);
+          break;
       }
 
       // Coloring the target
-      if (tag != null && tag.getColor() != null) {
+      boolean coloringAvailable = (tag != null && tag.getColor() != null);
+      if (coloringAvailable) {
         for (View view : target) {
           view.setBackgroundColor(parseInt(tag.getColor()));
         }
@@ -922,8 +934,7 @@ public class DetailFragment extends BaseFragment implements OnReminderPickedList
       noteTemporary.setLatitude(location.getLatitude());
       noteTemporary.setLongitude(location.getLongitude());
       if (!TextUtils.isEmpty(noteTemporary.getAddress())) {
-        binding.fragmentDetailContent.location.setVisibility(View.VISIBLE);
-        binding.fragmentDetailContent.location.setText(noteTemporary.getAddress());
+        setVisibilityAndText(noteTemporary.getAddress());
       } else {
         GeocodeHelper.getAddressFromCoordinates(location, mFragment);
       }
@@ -947,8 +958,7 @@ public class DetailFragment extends BaseFragment implements OnReminderPickedList
     if (!GeocodeHelper.areCoordinates(address)) {
       noteTemporary.setAddress(address);
     }
-    binding.fragmentDetailContent.location.setVisibility(View.VISIBLE);
-    binding.fragmentDetailContent.location.setText(address);
+    setVisibilityAndText(address);
     fade(binding.fragmentDetailContent.location, true);
   }
 
@@ -958,12 +968,16 @@ public class DetailFragment extends BaseFragment implements OnReminderPickedList
       noteTemporary.setLatitude(location.getLatitude());
       noteTemporary.setLongitude(location.getLongitude());
       noteTemporary.setAddress(address);
-      binding.fragmentDetailContent.location.setVisibility(View.VISIBLE);
-      binding.fragmentDetailContent.location.setText(address);
+      setVisibilityAndText(address);
       fade(binding.fragmentDetailContent.location, true);
     } else {
       mainActivity.showMessage(R.string.location_not_found, ONStyle.ALERT);
     }
+  }
+
+  private void setVisibilityAndText(String address) {
+    binding.fragmentDetailContent.location.setVisibility(View.VISIBLE);
+    binding.fragmentDetailContent.location.setText(address);
   }
 
   @Override
@@ -1098,7 +1112,7 @@ public class DetailFragment extends BaseFragment implements OnReminderPickedList
         showNoteInfo();
         break;
       default:
-        LogDelegate.w("Invalid menu option selected");
+        LogDelegate.warningLog("Invalid menu option selected");
     }
     return super.onOptionsItemSelected(item);
   }
@@ -1184,7 +1198,7 @@ public class DetailFragment extends BaseFragment implements OnReminderPickedList
     try {
       newView = mChecklistManager.convert(toggleChecklistView);
     } catch (ViewNotSupportedException e) {
-      LogDelegate.e("Error switching checklist view", e);
+      LogDelegate.errorLog("Error switching checklist view", e);
     }
 
     // Switches the views
@@ -1413,7 +1427,7 @@ public class DetailFragment extends BaseFragment implements OnReminderPickedList
           mainActivity.showMessage(R.string.note_updated, ONStyle.CONFIRM);
           break;
         default:
-          LogDelegate.e("Wrong element choosen: " + requestCode);
+          LogDelegate.errorLog("Wrong element choosen: " + requestCode);
       }
     }
   }
@@ -1507,7 +1521,7 @@ public class DetailFragment extends BaseFragment implements OnReminderPickedList
         .positiveText(R.string.ok)
         .onPositive((dialog, which) -> {
           mainActivity.deleteNote(noteTemporary);
-          LogDelegate.d("Deleted note with ID '" + noteTemporary.get_id() + "'");
+          LogDelegate.debugLog("Deleted note with ID '" + noteTemporary.get_id() + "'");
           mainActivity.showMessage(R.string.note_deleted, ONStyle.ALERT);
           goHome();
         }).build().show();
@@ -1534,7 +1548,7 @@ public class DetailFragment extends BaseFragment implements OnReminderPickedList
     // Check if some text or attachments of any type have been inserted or is an empty note
     if (goBack && TextUtils.isEmpty(noteTemporary.getTitle()) && TextUtils.isEmpty(noteTemporary.getContent())
         && noteTemporary.getAttachmentsList().isEmpty()) {
-      LogDelegate.d("Empty note not saved");
+      LogDelegate.debugLog("Empty note not saved");
       exitMessage = getString(R.string.empty_note_not_saved);
       exitCroutonStyle = ONStyle.INFO;
       goHome();
@@ -1647,7 +1661,7 @@ public class DetailFragment extends BaseFragment implements OnReminderPickedList
    * Notes locking with security password to avoid viewing, editing or deleting from unauthorized
    */
   private void lockNote() {
-    LogDelegate.d("Locking or unlocking note " + note.get_id());
+    LogDelegate.debugLog("Locking or unlocking note " + note.get_id());
 
     // If security password is not set yes will be set right now
     if (Prefs.getString(PREF_PASSWORD, null) == null) {
@@ -1756,7 +1770,7 @@ public class DetailFragment extends BaseFragment implements OnReminderPickedList
         }
       });
     } catch (IOException e) {
-      LogDelegate.e("prepare() failed", e);
+      LogDelegate.errorLog("prepare() failed", e);
       mainActivity.showMessage(R.string.error, ONStyle.ALERT);
     }
   }
@@ -1802,7 +1816,7 @@ public class DetailFragment extends BaseFragment implements OnReminderPickedList
             mRecorder.prepare();
             mRecorder.start();
           } catch (IOException | IllegalStateException e) {
-            LogDelegate.e("prepare() failed", e);
+            LogDelegate.errorLog("prepare() failed", e);
             mainActivity.showMessage(R.string.error, ONStyle.ALERT);
           }
         });
@@ -1909,7 +1923,7 @@ public class DetailFragment extends BaseFragment implements OnReminderPickedList
     switch (event.getAction()) {
 
       case MotionEvent.ACTION_DOWN:
-        LogDelegate.v("MotionEvent.ACTION_DOWN");
+        LogDelegate.vervoseLog("MotionEvent.ACTION_DOWN");
         int w;
 
         Point displaySize = Display.getUsableSize(mainActivity);
@@ -1923,7 +1937,7 @@ public class DetailFragment extends BaseFragment implements OnReminderPickedList
         break;
 
       case MotionEvent.ACTION_UP:
-        LogDelegate.v("MotionEvent.ACTION_UP");
+        LogDelegate.vervoseLog("MotionEvent.ACTION_UP");
         if (swiping) {
           swiping = false;
         }
@@ -1931,7 +1945,7 @@ public class DetailFragment extends BaseFragment implements OnReminderPickedList
 
       case MotionEvent.ACTION_MOVE:
         if (swiping) {
-          LogDelegate.v("MotionEvent.ACTION_MOVE at position " + x + ", " + y);
+          LogDelegate.vervoseLog("MotionEvent.ACTION_MOVE at position " + x + ", " + y);
           if (Math.abs(x - startSwipeX) > SWIPE_OFFSET) {
             swiping = false;
             FragmentTransaction transaction = mainActivity.getSupportFragmentManager()
@@ -1949,7 +1963,7 @@ public class DetailFragment extends BaseFragment implements OnReminderPickedList
         break;
 
       default:
-        LogDelegate.e("Wrong element choosen: " + event.getAction());
+        LogDelegate.errorLog("Wrong element choosen: " + event.getAction());
     }
 
     return true;
@@ -2005,7 +2019,7 @@ public class DetailFragment extends BaseFragment implements OnReminderPickedList
   public void onRecurrenceReminderPicked(String recurrenceRule) {
     noteTemporary.setRecurrenceRule(recurrenceRule);
     if (!TextUtils.isEmpty(recurrenceRule)) {
-      LogDelegate.d("Recurrent reminder set: " + recurrenceRule);
+      LogDelegate.debugLog("Recurrent reminder set: " + recurrenceRule);
       binding.fragmentDetailContent.datetime.setText(RecurrenceHelper
           .getNoteRecurrentReminderText(Long.parseLong(noteTemporary.getAlarm()), recurrenceRule));
     }
@@ -2332,7 +2346,7 @@ public class DetailFragment extends BaseFragment implements OnReminderPickedList
               null, 0);
           break;
         default:
-          LogDelegate.e("Wrong element choosen: " + v.getId());
+          LogDelegate.errorLog("Wrong element choosen: " + v.getId());
       }
       if (!isRecording) {
         attachmentDialog.dismiss();
